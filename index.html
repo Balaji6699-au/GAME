@@ -3,120 +3,366 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Canvas Game Animation Loop</title>
-    <!-- Load Tailwind CSS for modern styling -->
+    <title>Cosmic Drift (3D Runner)</title>
+    <!-- Load Tailwind for modern CSS utilities -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load three.js for 3D rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        /* Custom styles for the canvas container and character */
-        body {
+        body, html {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            height: 100%;
+            background-color: #00001a;
             font-family: 'Inter', sans-serif;
-            background-color: #0d1117; /* Dark background */
         }
-        #gameCanvas {
-            background-color: #161b22; /* Slightly lighter dark color for the game area */
-            border: 4px solid #007bff; /* Blue border to highlight the game screen */
-            border-radius: 12px;
-            box-shadow: 0 10px 25px rgba(0, 123, 255, 0.4);
+        #game-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+        canvas {
             display: block;
-            margin: 0 auto;
+        }
+        #ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(0, 0, 0, 0.75);
+            color: white;
+            font-size: 1.5rem;
+            text-align: center;
+            transition: opacity 0.5s;
+            z-index: 10;
+        }
+        .hidden {
+            display: none !important;
+        }
+        .score-display {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+            z-index: 5;
+        }
+        .btn-game {
+            background-color: #3b82f6;
+            color: white;
+            padding: 12px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 4px #1e40af;
+            transition: all 0.1s;
+            margin-top: 20px;
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
+        .btn-game:active {
+            transform: translateY(2px);
+            box-shadow: 0 2px #1e40af;
         }
     </style>
 </head>
-<body class="p-4 sm:p-8 flex flex-col items-center min-h-screen">
-
-    <div class="text-center mb-6 w-full max-w-2xl">
-        <h1 class="text-3xl font-bold text-white mb-2">The Bouncing Game Character</h1>
-        <p class="text-gray-400">This demonstrates the fundamental game loop: Update Position &rarr; Draw Frame &rarr; Repeat.</p>
-    </div>
-
-    <!-- The Canvas where the animation will run -->
-    <canvas id="gameCanvas" width="600" height="400"></canvas>
-
-    <div class="mt-6 p-4 bg-gray-800 rounded-lg shadow-lg max-w-xl text-sm">
-        <h2 class="text-lg font-semibold text-white mb-2">Animation Logic</h2>
-        <p class="text-gray-400">The `animate()` function uses <code class="text-blue-400">requestAnimationFrame</code> to run at the display's refresh rate, making the movement smooth.</p>
+<body>
+    <div id="game-container">
+        <div id="score-display" class="score-display">Score: 0</div>
+        
+        <!-- Game Overlay for Start/Game Over -->
+        <div id="ui-overlay">
+            <h1 class="text-4xl font-extrabold mb-4">Cosmic Drift</h1>
+            <p class="text-lg mb-6 text-gray-300">Pilot your ship through the asteroid field!</p>
+            <p class="text-sm mb-8 text-yellow-300">Use A/D or Left/Right Arrow Keys to move horizontally.</p>
+            <h2 id="final-message" class="text-3xl font-bold mb-4 text-red-400 hidden">GAME OVER</h2>
+            <p id="final-score-text" class="text-xl mb-6 hidden"></p>
+            <button id="start-button" class="btn-game">START DRIFT</button>
+        </div>
     </div>
 
     <script>
-        // Get the canvas element and its 2D drawing context
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
+        // Global variables provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-        // --- Game Object Definition ---
-        const player = {
-            x: 50,          // X position
-            y: canvas.height - 50, // Y position (on the "ground")
-            width: 40,      // Character width
-            height: 40,     // Character height
-            color: '#FFD700', // Gold color
-            velocityX: 3,   // Horizontal movement speed
-            velocityY: 0,   // Vertical movement speed (not used here, but essential for jumping)
-            gravity: 0.2    // Gravity (if jumping were implemented)
-        };
+        // --- three.js Setup Variables ---
+        let scene, camera, renderer;
+        let ship, light;
+        const obstacles = [];
+        let stars;
+        let gameActive = false;
+        let score = 0;
+        let speed = 0.5;
+        let obstacleSpawnTimer = 0;
+        const MAX_SPAWN_INTERVAL = 60; // Frames
+        const MIN_SPAWN_INTERVAL = 30;
 
-        /**
-         * The core function that updates the state (position, velocity, etc.) of all game objects.
-         */
-        function update() {
-            // 1. Update Position
-            player.x += player.velocityX;
+        // --- DOM Elements ---
+        const uiOverlay = document.getElementById('ui-overlay');
+        const startButton = document.getElementById('start-button');
+        const scoreDisplay = document.getElementById('score-display');
+        const finalMessage = document.getElementById('final-message');
+        const finalScoreText = document.getElementById('final-score-text');
 
-            // 2. Handle Boundary Collision (Bouncing)
-            // Check if the character hits the right wall
-            if (player.x + player.width > canvas.width) {
-                player.x = canvas.width - player.width; // Snap it back
-                player.velocityX *= -1; // Reverse direction
+        // --- Player Controls ---
+        const keyState = {};
+        const MAX_X = 10;
+        const SHIP_MOVE_SPEED = 0.3;
+
+        // --- Initialization ---
+        function init() {
+            // 1. Scene setup
+            scene = new THREE.Scene();
+            
+            // Background is black
+            scene.background = new THREE.Color(0x00001a); 
+
+            // 2. Camera setup (Perspective Camera)
+            // Field of view, Aspect Ratio, Near clipping plane, Far clipping plane
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 25;
+            camera.position.y = 2; // Look down slightly
+
+            // 3. Renderer setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('game-container').appendChild(renderer.domElement);
+
+            // 4. Lighting
+            light = new THREE.DirectionalLight(0xffffff, 1);
+            light.position.set(0, 10, 20);
+            scene.add(light);
+            scene.add(new THREE.AmbientLight(0x404040, 2));
+
+            // 5. Create Player Ship (Simple Cone for Dragon-like shape)
+            const geometry = new THREE.ConeGeometry(2, 6, 8);
+            const material = new THREE.MeshPhongMaterial({ color: 0xff5757 });
+            ship = new THREE.Mesh(geometry, material);
+            ship.rotation.x = Math.PI / 2; // Point cone forward
+            ship.position.set(0, 0, 20); // Starting position
+            scene.add(ship);
+            
+            // Add a star background (simple particle system)
+            createStarfield();
+
+            // Set up event listeners
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+        }
+        
+        // --- Starfield ---
+        function createStarfield() {
+            const starGeometry = new THREE.BufferGeometry();
+            const starMaterial = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.2,
+                sizeAttenuation: true
+            });
+
+            const vertices = [];
+            for (let i = 0; i < 500; i++) {
+                const x = THREE.MathUtils.randFloatSpread(200);
+                const y = THREE.MathUtils.randFloatSpread(200);
+                const z = THREE.MathUtils.randFloat(30, -200); // Behind the camera to far distance
+                vertices.push(x, y, z);
             }
-            // Check if the character hits the left wall
-            if (player.x < 0) {
-                player.x = 0; // Snap it back
-                player.velocityX *= -1; // Reverse direction
+
+            starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            stars = new THREE.Points(starGeometry, starMaterial);
+            scene.add(stars);
+        }
+
+
+        // --- Game Logic ---
+        
+        function updatePlayerMovement() {
+            if (keyState['ArrowLeft'] || keyState['a']) {
+                ship.position.x -= SHIP_MOVE_SPEED;
+            }
+            if (keyState['ArrowRight'] || keyState['d']) {
+                ship.position.x += SHIP_MOVE_SPEED;
+            }
+            
+            // Clamp ship position to prevent moving off-screen
+            ship.position.x = Math.max(-MAX_X, Math.min(MAX_X, ship.position.x));
+        }
+
+        function createObstacle() {
+            const size = THREE.MathUtils.randFloat(1.5, 4);
+            const geometry = new THREE.BoxGeometry(size, size, size);
+            const material = new THREE.MeshPhongMaterial({ color: 0x9c27b0, wireframe: false });
+            
+            const obstacle = new THREE.Mesh(geometry, material);
+            
+            // Random X position within screen bounds
+            const x = THREE.MathUtils.randFloat(-MAX_X, MAX_X); 
+            // Fixed Y position (centered on path)
+            const y = THREE.MathUtils.randFloat(-4, 4); 
+            // Far away on Z-axis
+            const z = -200; 
+
+            obstacle.position.set(x, y, z);
+            // Store size for collision check
+            obstacle.userData.size = size; 
+            
+            scene.add(obstacle);
+            obstacles.push(obstacle);
+        }
+
+        function updateObstacles() {
+            // Move obstacles forward (towards camera)
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                const obs = obstacles[i];
+                obs.position.z += speed; // Move towards Z=25 (camera)
+                obs.rotation.x += 0.01;
+                obs.rotation.y += 0.01;
+
+                // Check for despawn (passed the camera)
+                if (obs.position.z > camera.position.z + 5) {
+                    scene.remove(obs);
+                    obstacles.splice(i, 1);
+                    score++;
+                    scoreDisplay.textContent = `Score: ${score}`;
+                    
+                    // Increase difficulty (speed and spawn rate)
+                    speed = Math.min(1.5, speed + 0.005);
+                    obstacleSpawnTimer = Math.max(MIN_SPAWN_INTERVAL, obstacleSpawnTimer - 1);
+                }
+            }
+            
+            // Spawn new obstacles
+            if (frameCount % obstacleSpawnTimer === 0) {
+                 createObstacle();
             }
         }
 
-        /**
-         * The core function that draws the current state of the game world.
-         */
-        function draw() {
-            // 1. Clear the canvas for the new frame
-            // This is crucial to prevent "smearing" or trails.
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            // 2. Draw the Character (Player)
-            ctx.fillStyle = player.color;
-            ctx.shadowColor = 'rgba(255, 215, 0, 0.7)';
-            ctx.shadowBlur = 15;
-            ctx.fillRect(player.x, player.y, player.width, player.height);
-
-            // 3. Draw a "Floor" Line (for context)
-            ctx.shadowBlur = 0; // Disable shadow for the floor
-            ctx.strokeStyle = '#28a745'; // Green color
-            ctx.lineWidth = 4;
-            ctx.beginPath();
-            ctx.moveTo(0, canvas.height - 5);
-            ctx.lineTo(canvas.width, canvas.height - 5);
-            ctx.stroke();
+        function checkCollision() {
+            const shipBox = new THREE.Box3().setFromObject(ship);
+            
+            for (const obs of obstacles) {
+                const obsBox = new THREE.Box3().setFromObject(obs);
+                
+                // Simplified distance check for initial detection before full Box3 comparison
+                const distanceZ = Math.abs(ship.position.z - obs.position.z);
+                
+                // Only check full collision when the obstacle is near the ship
+                if (distanceZ < 10) { 
+                    if (shipBox.intersectsBox(obsBox)) {
+                        endGame();
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
-        /**
-         * The main game loop function. It's called continuously to create the animation.
-         */
+        // --- Game State Functions ---
+        
+        function resetGame() {
+            // Reset state
+            score = 0;
+            speed = 0.5;
+            frameCount = 0;
+            obstacleSpawnTimer = MAX_SPAWN_INTERVAL;
+            scoreDisplay.textContent = 'Score: 0';
+            
+            // Clear all obstacles
+            obstacles.forEach(obs => scene.remove(obs));
+            obstacles.length = 0; 
+            
+            // Reset player position
+            ship.position.set(0, 0, 20);
+            
+            // Reset UI
+            finalMessage.classList.add('hidden');
+            finalScoreText.classList.add('hidden');
+            startButton.textContent = 'START DRIFT';
+            startButton.onclick = startGame;
+        }
+
+        function startGame() {
+            if (gameActive) return;
+            resetGame();
+            gameActive = true;
+            uiOverlay.classList.add('hidden');
+            animate();
+        }
+
+        function endGame() {
+            gameActive = false;
+            
+            // Update UI
+            finalMessage.classList.remove('hidden');
+            finalScoreText.textContent = `Final Score: ${score}`;
+            finalScoreText.classList.remove('hidden');
+            startButton.textContent = 'TRY AGAIN';
+            startButton.onclick = startGame;
+            uiOverlay.classList.remove('hidden');
+        }
+
+        // --- Animation Loop ---
+        let frameCount = 0;
         function animate() {
-            // 1. Update all game logic
-            update();
-
-            // 2. Draw the new frame
-            draw();
-
+            if (!gameActive) {
+                return;
+            }
+            
+            frameCount++;
+            
+            // 1. Update game logic
+            updatePlayerMovement();
+            updateObstacles();
+            checkCollision();
+            
+            // 2. Render the scene
+            renderer.render(scene, camera);
+            
             // 3. Request the next frame
-            // requestAnimationFrame tells the browser: "Hey, call this function again
-            // before the next repaint." This is highly efficient and smooth.
             requestAnimationFrame(animate);
         }
 
-        // Start the game loop when the window loads
+        // --- Event Handlers ---
+        
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onKeyDown(event) {
+            const key = event.key.toLowerCase();
+            if (key === 'a' || key === 'd' || key === 'arrowleft' || key === 'arrowright') {
+                keyState[key] = true;
+            }
+            if (!gameActive && key === ' ' && startButton.offsetParent !== null) {
+                event.preventDefault(); // Prevent scrolling
+                startGame();
+            }
+        }
+
+        function onKeyUp(event) {
+            const key = event.key.toLowerCase();
+            if (key === 'a' || key === 'd' || key === 'arrowleft' || key === 'arrowright') {
+                keyState[key] = false;
+            }
+        }
+
+        // --- Initial Load ---
         window.onload = function() {
-            animate();
+            init();
+            resetGame();
         };
 
     </script>
