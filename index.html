@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canvas Game Animation Loop</title>
+    <!-- Load Tailwind CSS for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for the canvas container and character */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d1117; /* Dark background */
+        }
+        #gameCanvas {
+            background-color: #161b22; /* Slightly lighter dark color for the game area */
+            border: 4px solid #007bff; /* Blue border to highlight the game screen */
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 123, 255, 0.4);
+            display: block;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8 flex flex-col items-center min-h-screen">
+
+    <div class="text-center mb-6 w-full max-w-2xl">
+        <h1 class="text-3xl font-bold text-white mb-2">The Bouncing Game Character</h1>
+        <p class="text-gray-400">This demonstrates the fundamental game loop: Update Position &rarr; Draw Frame &rarr; Repeat.</p>
+    </div>
+
+    <!-- The Canvas where the animation will run -->
+    <canvas id="gameCanvas" width="600" height="400"></canvas>
+
+    <div class="mt-6 p-4 bg-gray-800 rounded-lg shadow-lg max-w-xl text-sm">
+        <h2 class="text-lg font-semibold text-white mb-2">Animation Logic</h2>
+        <p class="text-gray-400">The `animate()` function uses <code class="text-blue-400">requestAnimationFrame</code> to run at the display's refresh rate, making the movement smooth.</p>
+    </div>
+
+    <script>
+        // Get the canvas element and its 2D drawing context
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // --- Game Object Definition ---
+        const player = {
+            x: 50,          // X position
+            y: canvas.height - 50, // Y position (on the "ground")
+            width: 40,      // Character width
+            height: 40,     // Character height
+            color: '#FFD700', // Gold color
+            velocityX: 3,   // Horizontal movement speed
+            velocityY: 0,   // Vertical movement speed (not used here, but essential for jumping)
+            gravity: 0.2    // Gravity (if jumping were implemented)
+        };
+
+        /**
+         * The core function that updates the state (position, velocity, etc.) of all game objects.
+         */
+        function update() {
+            // 1. Update Position
+            player.x += player.velocityX;
+
+            // 2. Handle Boundary Collision (Bouncing)
+            // Check if the character hits the right wall
+            if (player.x + player.width > canvas.width) {
+                player.x = canvas.width - player.width; // Snap it back
+                player.velocityX *= -1; // Reverse direction
+            }
+            // Check if the character hits the left wall
+            if (player.x < 0) {
+                player.x = 0; // Snap it back
+                player.velocityX *= -1; // Reverse direction
+            }
+        }
+
+        /**
+         * The core function that draws the current state of the game world.
+         */
+        function draw() {
+            // 1. Clear the canvas for the new frame
+            // This is crucial to prevent "smearing" or trails.
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 2. Draw the Character (Player)
+            ctx.fillStyle = player.color;
+            ctx.shadowColor = 'rgba(255, 215, 0, 0.7)';
+            ctx.shadowBlur = 15;
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+
+            // 3. Draw a "Floor" Line (for context)
+            ctx.shadowBlur = 0; // Disable shadow for the floor
+            ctx.strokeStyle = '#28a745'; // Green color
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(0, canvas.height - 5);
+            ctx.lineTo(canvas.width, canvas.height - 5);
+            ctx.stroke();
+        }
+
+        /**
+         * The main game loop function. It's called continuously to create the animation.
+         */
+        function animate() {
+            // 1. Update all game logic
+            update();
+
+            // 2. Draw the new frame
+            draw();
+
+            // 3. Request the next frame
+            // requestAnimationFrame tells the browser: "Hey, call this function again
+            // before the next repaint." This is highly efficient and smooth.
+            requestAnimationFrame(animate);
+        }
+
+        // Start the game loop when the window loads
+        window.onload = function() {
+            animate();
+        };
+
+    </script>
+</body>
+</html>
